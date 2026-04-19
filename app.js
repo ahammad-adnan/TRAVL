@@ -565,8 +565,11 @@ function openCreateTrip(){
   ['t-name','t-dest','t-budget'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('t-status').value='upcoming';
   document.getElementById('t-emoji').value='✈️';
-  document.getElementById('t-start').value=new Date().toISOString().slice(0,10);
+  const today = new Date().toISOString().slice(0,10);
+  document.getElementById('t-start').value=today;
+  document.getElementById('t-start').min=today;
   document.getElementById('t-end').value='';
+  document.getElementById('t-end').min=today;
   document.querySelectorAll('.eo').forEach((e,i)=>e.classList.toggle('sel',i===0));
   document.getElementById('m-trip').style.display='flex';
   setTimeout(()=>document.getElementById('t-name').focus(),80);
@@ -583,7 +586,7 @@ function openEditTrip(id){
   document.getElementById('t-emoji').value=t.emoji||'✈️';
   document.getElementById('t-start').value=t.start||'';
   document.getElementById('t-end').value=t.end||'';
-  const emojis=['✈️','🌴','🗼','🏔️','🏖️','🗺️','🎒','🌍','🚂','🛳️','🏕️','🌸'];
+  const emojis=EMOJIS;
   document.querySelectorAll('.eo').forEach((e,i)=>e.classList.toggle('sel',emojis[i]===(t.emoji||'✈️')));
   document.getElementById('m-trip').style.display='flex';
 }
@@ -597,6 +600,8 @@ function submitTrip(){
   const end=document.getElementById('t-end').value;
   if(!name){toast('Trip name required','er');return;}
   if(!budget||budget<=0){toast('Valid budget required','er');return;}
+  if(start && end && end < start){toast('End date must be after start date','er');return;}
+  if(end && end < new Date().toISOString().slice(0,10) && !S.editTrip){toast('End date cannot be in the past','er');return;}
   if(S.editTrip){
     const t=S.trips.find(x=>x.id===S.editTrip);
     if(t) Object.assign(t,{name,destination:dest,budget,emoji,status,start,end});
@@ -647,7 +652,7 @@ function openEditExp(id){
   document.getElementById('e-notes').value=e.notes||'';
   document.getElementById('e-cat').value=e.category;
   document.getElementById('e-date').value=e.date;
-  const cats=['Food','Stay','Transport','Activity','Shopping','Other'];
+  const cats=CATS.map(c=>c.v);
   document.querySelectorAll('.co').forEach((el,i)=>el.classList.toggle('sel',cats[i]===e.category));
   document.getElementById('m-exp').style.display='flex';
 }
@@ -1244,7 +1249,16 @@ function exportTripPDF(){
   const rem = t.budget - spent;
   const stops = S.itineraries[t.id]||[];
   const cur = getCurrencyForTrip(t);
-  const pdfFmt = (n) => fmtT(n, t);
+  const pdfFmt = (n) => {
+    const s = fmtT(n, t);
+    // Replace common non-ASCII currency symbols with ASCII equivalents
+    return s.replace(/₹/g,'Rs').replace(/₩/g,'KRW ').replace(/₺/g,'TRY ')
+            .replace(/₴/g,'UAH ').replace(/₦/g,'NGN ').replace(/₱/g,'PHP ')
+            .replace(/₫/g,'VND ').replace(/฿/g,'THB ').replace(/৳/g,'BDT ')
+            .replace(/₮/g,'MNT ').replace(/₡/g,'CRC ').replace(/₪/g,'ILS ')
+            .replace(/﷼/g,'SAR ').replace(/د\.إ/g,'AED ').replace(/ر\.ق/g,'QAR ')
+            .replace(/د\.ك/g,'KWD ').replace(/[^\x00-\x7F]/g,'');
+  };
   const btn = document.querySelector('[onclick="exportTripPDF()"]');
   if(btn){btn.disabled=true;btn.innerHTML='⏳ Generating…';}
   try{
@@ -1254,15 +1268,15 @@ function exportTripPDF(){
     // Header
     doc.setFillColor(232,82,26);doc.rect(0,0,W,28,'F');
     doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(20);
-    doc.text('WanderPlan — Trip Report',M,18);
+    doc.text('WanderPlan - Trip Report',M,18);
     doc.setFontSize(9);doc.setFont('helvetica','normal');
     doc.text(`Generated ${new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}`,W-M,18,{align:'right'});
     Y.set(38);
     // Trip title
     doc.setTextColor(17,24,39);doc.setFont('helvetica','bold');doc.setFontSize(16);
-    doc.text(`${t.emoji||'✈'} ${t.name}`,M,Y.get());Y.add(7);
+    doc.text(t.name,M,Y.get());Y.add(7);
     doc.setFont('helvetica','normal');doc.setFontSize(10);doc.setTextColor(75,85,99);
-    doc.text(`Destination: ${t.destination||'TBD'}   Dates: ${t.start||'—'} to ${t.end||'—'}   Currency: ${cur.code} (${cur.sym})`,M,Y.get());Y.add(10);
+    doc.text(`Destination: ${t.destination||'TBD'}   Dates: ${t.start||'-'} to ${t.end||'-'}   Currency: ${cur.code} (${cur.sym.replace(/[^\x00-\x7F]/g,'')})`,M,Y.get());Y.add(10);
     // Budget summary box
     doc.setFillColor(249,248,245);doc.roundedRect(M,Y.get(),W-2*M,32,3,3,'F');
     doc.setDrawColor(229,231,235);doc.roundedRect(M,Y.get(),W-2*M,32,3,3,'S');
@@ -1283,10 +1297,23 @@ function exportTripPDF(){
     Y.add(38);
     // Expenses
     if(exps.length){
-      Y.add(4);doc.setFont('helvetica','bold');doc.setFontSize(11);doc.setTextColor(17,24,39);
-      doc.text('Expenses',M,Y.get());Y.add(6);
+      Y.add(6);
+      if(Y.get()>240){doc.addPage();Y.set(M);}
+      // Section header bar
+      doc.setFillColor(232,82,26);doc.rect(M,Y.get()-4,W-2*M,10,'F');
+      doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(255,255,255);
+      doc.text('EXPENSES',M+4,Y.get()+2);
+      doc.text(`(${exps.length} items)`,W-M-4,Y.get()+2,{align:'right'});
+      Y.add(12);
+      // Column headers
+      doc.setFillColor(243,244,246);doc.rect(M,Y.get()-4,W-2*M,8,'F');
+      doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(107,114,128);
+      doc.text('DESCRIPTION',M+2,Y.get());
+      doc.text('CATEGORY',M+100,Y.get());
+      doc.text('DATE',M+130,Y.get());
+      doc.text('AMOUNT',W-M-2,Y.get(),{align:'right'});
+      Y.add(8);
       const sorted=[...exps].sort((a,b)=>new Date(b.date)-new Date(a.date));
-      const catM={Food:'Food',Stay:'Stay',Transport:'Travel',Activity:'Activity',Shopping:'Shopping',Other:'Other'};
       sorted.forEach((e,i)=>{
         if(Y.get()>270){doc.addPage();Y.set(M);}
         const rowY=Y.get();
@@ -1294,38 +1321,51 @@ function exportTripPDF(){
         doc.rect(M,rowY-4,W-2*M,8,'F');
         doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(17,24,39);
         doc.text(e.description.slice(0,38),M+2,rowY);
-        doc.setTextColor(107,114,128);doc.text(catM[e.category]||e.category,M+100,rowY);
+        doc.setTextColor(107,114,128);doc.text(e.category,M+100,rowY);
         doc.text(e.date,M+130,rowY);
         doc.setFont('helvetica','bold');doc.setTextColor(17,24,39);
         doc.text(pdfFmt(e.amount),W-M-2,rowY,{align:'right'});
         Y.add(8);
       });
-      Y.add(4);doc.setFillColor(232,82,26);doc.rect(M,Y.get()-4,W-2*M,9,'F');
+      // Total row
+      Y.add(2);doc.setFillColor(232,82,26);doc.rect(M,Y.get()-4,W-2*M,9,'F');
       doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(255,255,255);
       doc.text('TOTAL SPENT',M+2,Y.get()+1.5);doc.text(pdfFmt(spent),W-M-2,Y.get()+1.5,{align:'right'});
-      Y.add(10);
+      Y.add(12);
     }
     // Itinerary
     if(stops.length){
       if(Y.get()>240){doc.addPage();Y.set(M);}
-      Y.add(4);doc.setFont('helvetica','bold');doc.setFontSize(11);doc.setTextColor(17,24,39);
-      doc.text('Itinerary Stops',M,Y.get());Y.add(6);
+      doc.setFillColor(13,148,136);doc.rect(M,Y.get()-4,W-2*M,10,'F');
+      doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(255,255,255);
+      doc.text('ITINERARY STOPS',M+4,Y.get()+2);
+      doc.text(`(${stops.length} stops)`,W-M-4,Y.get()+2,{align:'right'});
+      Y.add(12);
       stops.forEach((s,i)=>{
         if(Y.get()>270){doc.addPage();Y.set(M);}
-        doc.setFillColor(219,234,254);doc.circle(M+4,Y.get()-1.5,3,'F');
-        doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(29,78,216);
+        doc.setFillColor(219,234,254);doc.circle(M+4,Y.get()-1.5,3.5,'F');
+        doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(29,78,216);
         doc.text(String(i+1),M+4,Y.get()-0.5,{align:'center'});
-        doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(17,24,39);
-        doc.text(`${s.name}`,M+10,Y.get());
-        doc.setTextColor(107,114,128);doc.setFontSize(7.5);doc.text(s.addr,M+10,Y.get()+4.5);
-        if(s.notes){doc.setTextColor(37,99,235);doc.text(`Note: ${s.notes.slice(0,60)}${s.notes.length>60?'…':''}`,M+10,Y.get()+9);}
-        Y.add(s.notes?14:10);
+        doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(17,24,39);
+        doc.text(s.name.slice(0,55),M+10,Y.get());
+        doc.setFont('helvetica','normal');doc.setTextColor(107,114,128);doc.setFontSize(7.5);
+        doc.text(s.addr.slice(0,80),M+10,Y.get()+4.5);
+        if(s.notes){
+          doc.setTextColor(37,99,235);
+          doc.text(`Note: ${s.notes.slice(0,65)}${s.notes.length>65?'...':''}`,M+10,Y.get()+9);
+        }
+        Y.add(s.notes?15:11);
       });
     }
-    // Footer
-    doc.setFontSize(7.5);doc.setTextColor(156,163,175);
-    doc.text('Generated by WanderPlan · wanderplan.app',M,292);
-    doc.text(`Page 1 of ${doc.internal.getNumberOfPages()}`,W-M,292,{align:'right'});
+    // Footer on all pages
+    const totalPages = doc.internal.getNumberOfPages();
+    for(let p=1;p<=totalPages;p++){
+      doc.setPage(p);
+      doc.setDrawColor(229,231,235);doc.line(M,287,W-M,287);
+      doc.setFontSize(7.5);doc.setTextColor(156,163,175);
+      doc.text('Generated by WanderPlan',M,292);
+      doc.text(`Page ${p} of ${totalPages}`,W-M,292,{align:'right'});
+    }
     doc.save(`${t.name.replace(/[^a-z0-9]/gi,'_')}_WanderPlan.pdf`);
     toast('📄 PDF downloaded!','ok');
   }catch(err){
@@ -1345,7 +1385,7 @@ function exportDashboardPDF(){
     const W=210,M=18;let y=M;
     doc.setFillColor(232,82,26);doc.rect(0,0,W,28,'F');
     doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(20);
-    doc.text('WanderPlan — Dashboard Report',M,18);
+    doc.text('WanderPlan - Dashboard Report',M,18);
     doc.setFontSize(9);doc.setFont('helvetica','normal');
     doc.text(new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}),W-M,18,{align:'right'});
     y=38;
@@ -1357,11 +1397,12 @@ function exportDashboardPDF(){
       if(y>265){doc.addPage();y=M;}
       const sp=(S.expenses[t.id]||[]).reduce((s,e)=>s+e.amount,0);
       const p=t.budget?Math.min(sp/t.budget,1):0;
+      const tpdfFmt = (n) => fmtT(n,t).replace(/[^\x00-\x7F]/g,'');
       doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(17,24,39);
-      doc.text(`${t.emoji||'✈'} ${t.name}`,M,y);
+      doc.text(`${t.name}`,M,y);
       doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(75,85,99);
-      doc.text(`${t.destination||'TBD'} · ${t.status} · ${getCurrencyForTrip(t).code}`,M,y+5);
-      doc.text(`Budget: ${fmtT(t.budget,t)}  Spent: ${fmtT(sp,t)}  Remaining: ${fmtT(t.budget-sp,t)}`,M,y+10);
+      doc.text(`${t.destination||'TBD'} - ${t.status} - ${getCurrencyForTrip(t).code}`,M,y+5);
+      doc.text(`Budget: ${tpdfFmt(t.budget)}  Spent: ${tpdfFmt(sp)}  Remaining: ${tpdfFmt(t.budget-sp)}`,M,y+10);
       const bw=W-2*M-10;
       doc.setFillColor(229,231,235);doc.roundedRect(M,y+14,bw,3.5,1,1,'F');
       const fc=p<.7?[22,163,74]:p<.9?[217,119,6]:[220,38,38];
@@ -1369,13 +1410,67 @@ function exportDashboardPDF(){
       y+=22;
     });
     y+=4;doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(17,24,39);
-    doc.text(`Totals: Budget ${fmt(totalBudget)}  ·  Spent ${fmt(totalSpent)}  ·  Remaining ${fmt(totalBudget-totalSpent)}`,M,y);
+    const dashPdfFmt = (n) => fmt(n).replace(/[^\x00-\x7F]/g,'');
+    doc.text(`Totals: Budget ${dashPdfFmt(totalBudget)}  /  Spent ${dashPdfFmt(totalSpent)}  /  Remaining ${dashPdfFmt(totalBudget-totalSpent)}`,M,y);
     doc.setFontSize(7.5);doc.setTextColor(156,163,175);doc.text('Generated by WanderPlan',M,292);
     doc.save('WanderPlan_Dashboard.pdf');
     toast('📄 Dashboard PDF downloaded!','ok');
   }catch(err){console.error(err);toast('PDF failed: '+err.message,'er');}
   finally{if(btn){btn.disabled=false;btn.innerHTML='📄 <span>Export PDF</span>';}}
 }
+
+// ─── DATE FIELD CONSTRAINTS ───
+document.addEventListener('DOMContentLoaded', () => {
+  const startEl = document.getElementById('t-start');
+  const endEl = document.getElementById('t-end');
+  if (startEl && endEl) {
+    // When start changes, update end's min
+    startEl.addEventListener('change', () => {
+      endEl.min = startEl.value || '';
+      if (endEl.value && endEl.value < startEl.value) endEl.value = startEl.value;
+    });
+    // End date cannot be before today (only enforce on new trips, done in submitTrip for edits)
+    endEl.addEventListener('change', () => {
+      if (startEl.value && endEl.value < startEl.value) {
+        toast('End date must be after start date', 'er');
+        endEl.value = startEl.value;
+      }
+    });
+  }
+});
+
+// ═══════════════════════════════════════════════
+//  INIT PICKERS
+// ═══════════════════════════════════════════════
+const EMOJIS = ['✈️','🌴','🗼','🏔️','🏖️','🗺️','🎒','🌍','🚂','🛳️','🏕️','🌸'];
+const CATS = [
+  {v:'Food',i:'🍴',l:'Food'},
+  {v:'Stay',i:'🏨',l:'Stay'},
+  {v:'Transport',i:'🚗',l:'Travel'},
+  {v:'Activity',i:'🎭',l:'Activity'},
+  {v:'Shopping',i:'🛍',l:'Shopping'},
+  {v:'Other',i:'📦',l:'Other'},
+];
+
+function initPickers() {
+  // Emoji picker
+  const eg = document.getElementById('emoji-grid');
+  if (eg && !eg.children.length) {
+    eg.innerHTML = EMOJIS.map((e,i) =>
+      `<button type="button" class="eo${i===0?' sel':''}" onclick="pickEmoji(this,'${e}')">${e}</button>`
+    ).join('');
+  }
+  // Category picker
+  const cp = document.getElementById('cat-picker');
+  if (cp && !cp.children.length) {
+    cp.innerHTML = CATS.map((c,i) =>
+      `<button type="button" class="co${i===0?' sel':''}" onclick="pickCat(this,'${c.v}')">${c.i} ${c.l}</button>`
+    ).join('');
+  }
+}
+document.addEventListener('DOMContentLoaded', initPickers);
+// Also call immediately in case DOM is already ready
+if (document.readyState !== 'loading') initPickers();
 
 // ─── INIT ───
 load();
